@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple File Share</title>
+    <!-- Inter & JetBrains Mono Fonts CDN -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Outlined" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <!-- Global Navigation (True Black, 44px) -->
+    <header class="global-nav">
+        <div class="global-nav-content">
+            <div class="brand">
+                <span class="material-icons-outlined logo-icon">folder_shared</span>
+                <span class="brand-title">Simple File Share</span>
+            </div>
+            <div class="global-nav-status">
+                <div class="status-indicator">
+                    <span class="status-dot online"></span>
+                    <span class="status-text">Server Online</span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Landing View -->
+    <div id="landing-view" style="display: none; padding: 60px 20px; text-align: center;">
+        <div class="settings-tile" style="max-width: 400px; margin: 0 auto; text-align: left; background: var(--surface-pearl);">
+            <div style="text-align: center; margin-bottom: 20px;">
+                <span class="material-icons-outlined" style="font-size: 48px; color: var(--primary);">meeting_room</span>
+            </div>
+            <h2 style="text-align: center; margin-bottom: 10px;">공유 방 접속</h2>
+            <p style="text-align: center; color: var(--ink-muted-48); margin-bottom: 30px;">입장할 공유 방 ID를 입력하세요.</p>
+            <div class="form-group">
+                <input type="text" id="share-id-input" placeholder="예: my-folder" style="text-align: center; font-size: 1.2rem;">
+            </div>
+            <button class="btn btn-primary btn-block" id="btn-join-share">접속하기</button>
+        </div>
+    </div>
+
+    <!-- App View -->
+    <div id="app-view" style="display: none;">
+        <!-- Sub Navigation Frosted (Parchment + backdrop filter, 52px, Sticky) -->
+        <nav class="sub-nav-frosted">
+            <div class="sub-nav-content">
+                <div class="sub-nav-title" style="display: flex; align-items: center;">
+                    <div style="display: flex; align-items: center;">
+                        <span class="share-url-indicator" id="share-url-display">접속 주소: http://localhost:8000</span>
+                        <span id="room-auth-indicator" style="display: none; background: #e0f8e9; color: #10b981; border: 1px solid #10b981; padding: 2px 8px; border-radius: 12px; font-size: 12px; margin-left: 10px; font-weight: 600; align-items: center; gap: 4px;">
+                            <span class="material-icons-outlined" style="font-size: 14px;">verified_user</span>
+                            방 관리자
+                        </span>
+                        <span id="auth-timer" style="display: none; font-size: 13px; color: var(--error-color); margin-left: 10px; font-weight: 600; vertical-align: middle;"></span>
+                        <button id="btn-logout" style="display: none; background: none; border: none; cursor: pointer; color: var(--error-color); margin-left: 2px; padding: 2px; border-radius: 4px;" title="로그아웃">
+                            <span class="material-icons-outlined" style="font-size: 18px; vertical-align: middle;">logout</span>
+                        </button>
+                    </div>
+                    <button class="btn btn-pearl-capsule" id="btn-show-qr" style="margin-left: 10px;">
+                        <span class="material-icons-outlined">qr_code_2</span>
+                    </button>
+                </div>
+                <div class="app-nav">
+                    <button class="nav-tab active" data-tab="files">파일 공유</button>
+                    <button class="nav-tab" data-tab="admin-rooms" id="tab-btn-admin-rooms" style="display:none;">모든 방 관리</button>
+                    <button class="nav-tab" data-tab="logs" id="tab-btn-logs" style="display:none;">시스템 로그</button>
+                    <button class="nav-tab" data-tab="settings" id="tab-btn-settings" style="display:none;">관리자 설정</button>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Main Content Area -->
+        <div class="app-container">
+            <main class="app-content">
+                <!-- Tab 1: Files Area -->
+                <section id="tab-files" class="tab-panel active">
+                    <!-- Path Breadcrumb Navigation -->
+                    <div class="breadcrumb-container" id="breadcrumb-container" style="display: flex; align-items: center; gap: 8px; margin-bottom: 20px; font-weight: 500; font-size: 1.1rem;">
+                        <span class="material-icons-outlined" style="cursor: pointer; color: var(--primary);" id="breadcrumb-home">home</span>
+                        <div id="breadcrumb-path" style="display: flex; align-items: center; gap: 8px;">
+                            <!-- 동적으로 경로 추가됨 -->
+                        </div>
+                    </div>
+
+                    <!-- Drop Zone Tile (Parchment Style) -->
+                    <div class="upload-tile" id="drop-zone">
+                        <input type="file" id="file-input" multiple style="display: none;">
+                        <div class="upload-ui">
+                            <span class="material-icons-outlined upload-icon">cloud_upload</span>
+                            <h3>여기에 파일을 드래그 앤 드롭 하세요</h3>
+                            <p class="upload-subtext">또는 브라우저를 통해 파일을 선택할 수 있습니다.</p>
+                            
+                            <div class="form-group" style="margin: 15px 0; display: flex; justify-content: center;">
+                                <label style="display: inline-flex; align-items: center; gap: 8px; cursor: pointer; color: var(--ink-muted-80);">
+                                    <input type="checkbox" id="upload-protected">
+                                    <span>비밀번호로 보호 (방 비밀번호 필요)</span>
+                                </label>
+                            </div>
+                            
+                            <button class="btn btn-primary" onclick="document.getElementById('file-input').click()">파일 찾아보기</button>
+                        </div>
+                    </div>
+
+                    <!-- Upload Progress (Pearl Card Style) -->
+                    <div class="progress-container" id="progress-container" style="display: none;">
+                        <div class="progress-header">
+                            <span id="progress-filename">filename.zip</span>
+                            <span id="progress-percentage">0%</span>
+                        </div>
+                        <div class="progress-bar-bg">
+                            <div class="progress-bar-fill" id="progress-bar-fill" style="width: 0%;"></div>
+                        </div>
+                    </div>
+
+                    <!-- File List Section (Pure White Tile Style) -->
+                    <div class="file-list-tile">
+                        <div class="tile-header">
+                            <h2 style="display: flex; align-items: center; gap: 8px;">
+                                <span id="current-folder-title">공유 중인 파일 목록</span>
+                            </h2>
+                            <div class="header-actions" style="display: flex; gap: 10px;">
+                                <button class="btn btn-pearl-capsule" id="btn-room-settings" style="color: var(--ink-muted-48); opacity: 0.6; cursor: not-allowed;">
+                                    <span class="material-icons-outlined">settings</span>
+                                    <span>방 설정</span>
+                                </button>
+                                <button class="btn btn-pearl-capsule" id="btn-new-folder" style="color: var(--ink-muted-48); opacity: 0.6; cursor: not-allowed;">
+                                    <span class="material-icons-outlined">create_new_folder</span>
+                                    <span>새 폴더</span>
+                                </button>
+                                <button class="btn btn-pearl-capsule" id="btn-unlock-files">
+                                    <span class="material-icons-outlined">lock</span>
+                                    <span>비밀번호 인증</span>
+                                </button>
+                                <button class="btn btn-pearl-capsule" id="btn-refresh-files">
+                                    <span class="material-icons-outlined">refresh</span>
+                                    <span>새로고침</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="file-table">
+                                <thead>
+                                    <tr>
+                                        <th>파일명</th>
+                                        <th>파일 크기</th>
+                                        <th>업로드 일시</th>
+                                        <th class="text-center">상태</th>
+                                        <th class="text-right">작업</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="file-list-body">
+                                    <tr>
+                                        <td colspan="5" class="empty-state">
+                                            <span class="material-icons-outlined">info</span>
+                                            <p>업로드된 파일이 없습니다. 첫 파일을 올려보세요!</p>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="pagination" id="files-pagination"></div>
+                    </div>
+
+                    <!-- README.md Rendering Card -->
+                    <div class="readme-card" id="readme-container" style="display: none; margin-top: 20px;">
+                        <div class="readme-header">
+                            <span class="material-icons-outlined" style="font-size: 18px;">description</span>
+                            <span id="readme-filename">README.md</span>
+                        </div>
+                        <div class="readme-body" id="readme-body"></div>
+                    </div>
+                </section>
+
+                <!-- Tab: Admin Rooms Area -->
+                <section id="tab-admin-rooms" class="tab-panel">
+                    <!-- Admin Upload Tile -->
+                    <div class="upload-tile" id="admin-drop-zone">
+                        <input type="file" id="admin-file-input" multiple style="display: none;">
+                        <div class="upload-ui">
+                            <span class="material-icons-outlined upload-icon" style="color: var(--primary);">admin_panel_settings</span>
+                            <h3>특정 방으로 바로 파일 업로드</h3>
+                            <div class="form-group" style="margin: 15px auto; max-width: 300px;">
+                                <input type="text" id="admin-target-room-id" placeholder="타겟 방 ID 입력 (예: secret-room)" style="text-align: center; font-size: 1.1rem; font-weight: 600;">
+                            </div>
+                            <div class="form-group" style="margin: 15px 0; display: flex; justify-content: center;">
+                                <label style="display: inline-flex; align-items: center; gap: 8px; cursor: pointer; color: var(--ink-muted-80);">
+                                    <input type="checkbox" id="admin-upload-protected">
+                                    <span>비밀번호로 보호 (방 비밀번호 필요)</span>
+                                </label>
+                            </div>
+                            <button class="btn btn-primary" onclick="document.getElementById('admin-file-input').click()">파일 찾아보기</button>
+                        </div>
+                    </div>
+
+                    <!-- Admin Rooms Table -->
+                    <div class="file-list-tile" style="margin-top: 20px;">
+                        <div class="tile-header">
+                            <h2>전체 공유 방 목록</h2>
+                            <button class="btn btn-pearl-capsule" id="btn-refresh-admin-rooms">
+                                <span class="material-icons-outlined">refresh</span>
+                                <span>새로고침</span>
+                            </button>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="file-table">
+                                <thead>
+                                    <tr>
+                                        <th>방 ID</th>
+                                        <th class="text-center">보호 여부</th>
+                                        <th class="text-right">파일 수</th>
+                                        <th class="text-right">총 용량</th>
+                                        <th class="text-center">작업</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="admin-rooms-body">
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="pagination" id="admin-rooms-pagination"></div>
+                    </div>
+                    
+                    <!-- Admin Files Table -->
+                    <div class="file-list-tile" style="margin-top: 20px;">
+                        <div class="tile-header">
+                            <h2>전체 시스템 파일 목록</h2>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="file-table">
+                                <thead>
+                                    <tr>
+                                        <th>방 ID</th>
+                                        <th>파일명</th>
+                                        <th class="text-right">파일 크기</th>
+                                        <th class="text-right">다운로드 수</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="admin-files-body">
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="pagination" id="admin-files-pagination"></div>
+                    </div>
+                </section>
+
+                <!-- Tab 2: Logs Area -->
+                <section id="tab-logs" class="tab-panel">
+                    <!-- Terminal Tile (True Black Style) -->
+                    <div class="terminal-tile">
+                        <div class="terminal-header">
+                            <div class="terminal-title">
+                                <span class="material-icons-outlined terminal-icon">terminal</span>
+                                <span>server_output.log</span>
+                            </div>
+                            <div class="terminal-actions">
+                                <span class="log-status">실시간 감시 중</span>
+                                <button class="btn btn-icon" id="btn-clear-logs" title="로그 창 비우기">
+                                    <span class="material-icons-outlined">delete_sweep</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="terminal-body" id="log-console">
+                            <!-- Logs will dynamically load here -->
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Tab 3: Settings Area -->
+                <section id="tab-settings" class="tab-panel">
+                    <!-- Lock Overlay for Authentication (Parchment Card) -->
+                    <div class="settings-lock-overlay" id="settings-lock-overlay">
+                        <div class="lock-card">
+                            <span class="material-icons-outlined lock-icon">admin_panel_settings</span>
+                            <h2>관리자 인증</h2>
+                            <p>전역 시스템 설정에 접근하려면 관리자 비밀번호를 입력하세요.</p>
+                            <div class="form-group" style="width: 100%;">
+                                <input type="password" id="admin-auth-password" placeholder="비밀번호 입력" style="text-align: center;">
+                                <span class="error-msg" id="auth-error-msg" style="display: none; color: var(--error-color); font-size: 12px; margin-top: 6px; text-align: center;">비밀번호가 일치하지 않습니다.</span>
+                            </div>
+                            <button class="btn btn-primary btn-block" id="btn-submit-auth">확인</button>
+                        </div>
+                    </div>
+
+                    <!-- Settings Content Card (Pearl Card Style) -->
+                    <div class="settings-tile" id="settings-content-card" style="display: none;">
+                        <div class="settings-header" style="display: flex; justify-content: space-between; align-items: flex-start;">
+                            <div>
+                                <h2>서버 관리자 설정</h2>
+                                <p class="settings-subtext">서비스 구동 환경 설정을 수정합니다. 포트 변경 시 서버가 재기동됩니다.</p>
+                            </div>
+                            <button class="btn btn-pearl-capsule" id="btn-lock-admin" title="다시 잠그기" style="display: flex; align-items: center; gap: 4px; padding: 6px 14px; background: var(--surface-pearl); border: 1px solid var(--hairline); border-radius: 11px; cursor: pointer;">
+                                <span class="material-icons-outlined" style="font-size: 18px;">lock</span>
+                                <span style="font-size: 13px; font-weight: 500;">잠금</span>
+                            </button>
+                        </div>
+                        <form class="settings-form" id="settings-form">
+                            <div class="form-group">
+                                <label for="settings-port">서버 포트 번호</label>
+                                <input type="number" id="settings-port" name="port" min="1024" max="65535" required>
+                                <span class="form-help">설정 가능한 범위: 1024 ~ 65535 (기본값: 8000)</span>
+                            </div>
+                            <div class="form-group">
+                                <label for="settings-upload-limit">최대 업로드 파일 크기 (MB)</label>
+                                <input type="number" id="settings-upload-limit" name="max_upload_size_mb" min="1" required>
+                                <span class="form-help">사용자당 업로드 가능한 단일 파일 최대 크기</span>
+                            </div>
+                            <div class="form-group">
+                                <label for="settings-max-failed">관리자 비밀번호 실패 허용수</label>
+                                <input type="number" id="settings-max-failed" name="max_failed_attempts" min="1" required>
+                                <span class="form-help">초과 시 해당 IP가 15분간 차단됩니다. (기본값: 10)</span>
+                            </div>
+                            <div class="form-group">
+                                <label for="settings-salt">비밀번호 Salt (보안 강화용)</label>
+                                <input type="text" id="settings-salt" name="password_salt" placeholder="문자열 입력">
+                                <span class="form-help" style="color: var(--error-color); font-weight: 500;">⚠️ 주의: Salt 변경 시 기존 모든 방 비밀번호와 관리자 암호가 즉시 무효화됩니다!</span>
+                            </div>
+                            <div class="form-group">
+                                <label for="settings-admin-path">비밀 관리자 접속 경로 (Admin Path)</label>
+                                <input type="text" id="settings-admin-path" name="admin_path" placeholder="예: admin" required>
+                                <span class="form-help">관리자 메뉴를 표시할 URL 경로입니다. (기본값: admin)</span>
+                            </div>
+                            <div class="form-group">
+                                <label for="settings-password">새 관리자 비밀번호</label>
+                                <input type="password" id="settings-password" name="admin_password" placeholder="변경할 경우에만 입력">
+                                <span class="form-help">비밀번호를 변경하려면 입력하세요 (미입력 시 기존 비밀번호 유지).</span>
+                            </div>
+                            <div class="form-group">
+                                <label for="settings-password-confirm">새 관리자 비밀번호 확인</label>
+                                <input type="password" id="settings-password-confirm" placeholder="변경할 비밀번호 재입력">
+                                <span class="error-msg" id="password-confirm-error-msg" style="display: none; color: var(--error-color); font-size: 12px; margin-top: 6px;">새 비밀번호가 일치하지 않습니다.</span>
+                            </div>
+                            <div class="settings-actions">
+                                <button type="submit" class="btn btn-primary btn-block">
+                                    <span class="material-icons-outlined">save</span>
+                                    <span>설정 저장 및 서버 재시작</span>
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </section>
+            </main>
+        </div>
+    </div>
+
+    <!-- Container Auth Modal -->
+    <div class="overlay" id="container-auth-overlay" style="display: none;">
+        <div class="overlay-card lock-card">
+            <span class="material-icons-outlined lock-icon">lock</span>
+            <h2>방 비밀번호 인증</h2>
+            <p style="text-align: center; color: var(--ink-muted-48); margin-bottom: 20px;">
+                보호된 파일을 조회하거나 업로드하려면 방 비밀번호를 입력하세요.<br>
+                (최초 생성 시 입력한 비밀번호가 설정됩니다)
+            </p>
+            <div class="form-group" style="width: 100%;">
+                <input type="password" id="container-auth-password" placeholder="비밀번호 입력" style="text-align: center;">
+                <span class="error-msg" id="container-auth-error-msg" style="display: none; color: var(--error-color); font-size: 12px; margin-top: 6px; text-align: center;">비밀번호가 올바르지 않습니다.</span>
+            </div>
+            <div style="display: flex; gap: 10px; margin-top: 20px; width: 100%;">
+                <button class="btn btn-primary" style="flex: 1;" id="btn-submit-container-auth">확인</button>
+                <button class="btn btn-secondary" style="flex: 1; background: var(--surface-pearl); border: 1px solid var(--hairline); color: var(--ink);" id="btn-cancel-container-auth">취소</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Room Setup Modal -->
+    <div class="overlay" id="room-setup-overlay" style="display: none;">
+        <div class="overlay-card lock-card">
+            <span class="material-icons-outlined lock-icon" style="color: var(--primary);">meeting_room</span>
+            <h2>새 공유 방 생성</h2>
+            <p style="text-align: center; color: var(--ink-muted-48); margin-bottom: 20px;">
+                이 방은 아직 생성되지 않았습니다. 비밀번호를 설정하여 생성하세요.<br>
+                (비밀번호를 비워두면 공개 방으로 생성됩니다)
+            </p>
+            <div class="form-group" style="width: 100%;">
+                <input type="password" id="room-setup-password" placeholder="비밀번호 (선택 사항)" style="text-align: center;">
+            </div>
+            <div class="form-group" style="width: 100%;">
+                <input type="password" id="room-setup-password-confirm" placeholder="비밀번호 확인" style="text-align: center;">
+                <span class="error-msg" id="room-setup-error-msg" style="display: none; color: var(--error-color); font-size: 12px; margin-top: 6px; text-align: center;">비밀번호가 일치하지 않습니다.</span>
+            </div>
+            <button class="btn btn-primary" style="width: 100%; margin-top: 10px;" id="btn-create-room">방 생성</button>
+        </div>
+    </div>
+
+    <!-- Room Password Change Modal -->
+    <div class="overlay" id="room-password-overlay" style="display: none;">
+        <div class="overlay-card lock-card">
+            <span class="material-icons-outlined lock-icon">vpn_key</span>
+            <h2>방 비밀번호 변경</h2>
+            <div class="form-group" style="width: 100%;">
+                <input type="password" id="room-pw-current" placeholder="현재 비밀번호" style="text-align: center;">
+            </div>
+            <div class="form-group" style="width: 100%;">
+                <input type="password" id="room-pw-new" placeholder="새 비밀번호" style="text-align: center;">
+            </div>
+            <div class="form-group" style="width: 100%;">
+                <input type="password" id="room-pw-confirm" placeholder="새 비밀번호 확인" style="text-align: center;">
+                <span class="error-msg" id="room-pw-error-msg" style="display: none; color: var(--error-color); font-size: 12px; margin-top: 6px; text-align: center;"></span>
+            </div>
+            <div style="display: flex; gap: 10px; margin-top: 10px; width: 100%;">
+                <button class="btn btn-primary" style="flex: 1;" id="btn-save-room-pw">변경</button>
+                <button class="btn btn-secondary" style="flex: 1; background: var(--surface-pearl); border: 1px solid var(--hairline); color: var(--ink);" id="btn-cancel-room-pw">취소</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- QR Code Modal -->
+    <div class="overlay" id="qr-overlay" style="display: none;">
+        <div class="overlay-card" style="text-align: center; max-width: 360px;">
+            <span class="material-icons-outlined" style="font-size: 36px; color: var(--primary); margin-bottom: 10px;">qr_code_2</span>
+            <h2>QR 코드 공유</h2>
+            <p style="color: var(--ink-muted-48); margin-bottom: 16px;">모바일 기기로 스캔하여 접속하세요</p>
+            <div id="qr-canvas-container" style="display: flex; justify-content: center; margin-bottom: 16px;"></div>
+            <div style="background: var(--surface-pearl); padding: 10px; border-radius: 8px; font-family: 'JetBrains Mono'; font-size: 13px; word-break: break-all;" id="qr-url-text"></div>
+            <button class="btn btn-secondary" style="margin-top: 16px; background: var(--surface-pearl); border: 1px solid var(--hairline); color: var(--ink);" id="btn-close-qr">닫기</button>
+        </div>
+    </div>
+
+    <!-- Restarting Overlay Modal -->
+    <div class="overlay" id="restart-overlay" style="display: none;">
+        <div class="overlay-card">
+            <span class="material-icons-outlined spinning-icon">sync</span>
+            <h2>서버를 재시작하는 중입니다</h2>
+            <p>설정된 포트 정보를 바탕으로 서비스를 다시 구동하고 있습니다.</p>
+            <div class="countdown-container">
+                잠시 후 <span id="countdown-redirect-url">http://localhost:8000</span> 주소로 자동 연결됩니다...
+                <div class="timer" id="restart-timer">5</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="toast">설정이 임시 저장되었습니다.</div>
+
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
+    <script src="/static/app.js"></script>
+</body>
+</html>

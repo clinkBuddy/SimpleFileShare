@@ -1,0 +1,41 @@
+# Python 캐시 및 컴파일 파일
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# 가상 환경
+venv/
+.venv/
+env/
+ENV/
+
+# PyInstaller 빌드 아티팩트
+build/
+dist/
+*.spec
+
+# 로컬 설정 및 임시 데이터베이스
+config.json
+fileshare.db
+*.db
+*.sqlite3
+
+# 사용자 업로드 파일
+uploads/
+
+# 실행 로그 파일
+*.log
+
+# OS 관련 임시 파일
+.DS_Store
+Thumbs.db
+
+# IDE 및 에디터 설정
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 환경 변수 및 기타 임시 파일
+.env
