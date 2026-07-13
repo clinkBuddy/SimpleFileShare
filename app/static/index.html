@@ -40,6 +40,11 @@
                 <input type="text" id="share-id-input" placeholder="예: my-folder" style="text-align: center; font-size: 1.2rem;">
             </div>
             <button class="btn btn-primary btn-block" id="btn-join-share">접속하기</button>
+            <div id="share-rooms-section" style="display: none; margin-top: 30px; border-top: 1px solid var(--border-subtle, #e5e5e5); padding-top: 20px;">
+                <h3 style="font-size: 0.95rem; margin-bottom: 8px; color: var(--ink-muted-48);">자동 공유 폴더</h3>
+                <p id="share-path-display" style="font-size: 0.8rem; color: var(--ink-muted-48); margin-bottom: 12px; word-break: break-all;"></p>
+                <div id="share-rooms-list" style="display: flex; flex-direction: column; gap: 8px; max-height: 300px; overflow-y: auto;"></div>
+            </div>
         </div>
     </div>
 

@@ -26,6 +26,34 @@ document.addEventListener('DOMContentLoaded', () => {
         shareIdInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') joinRoom();
         });
+
+        (async () => {
+            try {
+                const res = await fetch('/api/share/rooms');
+                if (!res.ok) return;
+                const data = await res.json();
+                if (!data.rooms || data.rooms.length === 0) return;
+
+                const section = document.getElementById('share-rooms-section');
+                const listEl = document.getElementById('share-rooms-list');
+                const pathEl = document.getElementById('share-path-display');
+                section.style.display = 'block';
+                pathEl.textContent = data.share_path;
+
+                data.rooms.forEach(room => {
+                    const btn = document.createElement('button');
+                    btn.className = 'btn btn-block';
+                    btn.style.cssText = 'text-align: left; display: flex; justify-content: space-between; align-items: center;';
+                    const label = room.label || room.id;
+                    btn.innerHTML = `<span>${label}</span><span style="color: var(--ink-muted-48); font-size: 0.85rem;">${room.file_count}개 파일</span>`;
+                    btn.addEventListener('click', () => { window.location.href = `/${encodeURIComponent(room.id)}`; });
+                    listEl.appendChild(btn);
+                });
+            } catch (e) {
+                console.error('Failed to load share rooms', e);
+            }
+        })();
+
         return; // 메인 앱 초기화 중단
     } else {
         // 컨테이너 페이지

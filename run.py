@@ -5,6 +5,7 @@ import hashlib
 import time
 import subprocess
 import threading
+import argparse
 import webview
 
 # PyInstaller 패키징 여부 감지
@@ -29,7 +30,8 @@ def load_config():
             "admin_password": hashlib.sha256(("admin").encode('utf-8')).hexdigest(),
             "admin_path": "admin",
             "max_failed_attempts": 10,
-            "password_salt": ""
+            "password_salt": "",
+            "share_path": ""
         }
         try:
             with open(CONFIG_PATH, "w", encoding="utf-8") as f:
@@ -56,6 +58,9 @@ def load_config():
             if "password_salt" not in config:
                 config["password_salt"] = ""
                 migrated = True
+            if "share_path" not in config:
+                config["share_path"] = ""
+                migrated = True
                 
             if migrated:
                 with open(CONFIG_PATH, "w", encoding="utf-8") as f:
@@ -74,7 +79,17 @@ def load_config():
             return config
     except Exception as e:
         print(f"[run.py] Failed to read config file, using defaults. Error: {e}")
-        return {"port": 8000, "max_upload_size_mb": 100, "admin_password": "admin", "admin_path": "admin", "max_failed_attempts": 10, "password_salt": ""}
+        return {"port": 8000, "max_upload_size_mb": 100, "admin_password": "admin", "admin_path": "admin", "max_failed_attempts": 10, "password_salt": "", "share_path": ""}
+
+def save_config(config):
+    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+        json.dump(config, f, indent=4)
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Simple File Share")
+    parser.add_argument("--server", action="store_true", help="GUI 없이 서버만 실행")
+    parser.add_argument("--share-path", type=str, default=None, help="자동 공유할 루트 경로 (하위 폴더가 방 이름)")
+    return parser.parse_args()
 
 # 글로벌 공유 인스턴스 변수
 server_thread = None
@@ -156,22 +171,49 @@ def on_closed():
         server_instance.should_exit_permanently = True
 
 def main():
-    global window_instance
-    
+    global window_instance, app_should_exit, server_instance
+
+    args = parse_args()
+
     # 패키지 임포트 보장
     if RUNNING_DIR not in sys.path:
         sys.path.insert(0, RUNNING_DIR)
-        
+
     config = load_config()
+
+    if args.share_path:
+        share_path = os.path.abspath(args.share_path)
+        if not os.path.isdir(share_path):
+            print(f"[run.py] ERROR: Share path does not exist: {share_path}")
+            sys.exit(1)
+        config["share_path"] = share_path
+        save_config(config)
+        print(f"[run.py] Share path set to: {share_path}")
+
     port = config.get("port", 8000)
-    
+
     # 서버 관리 스레드 기동
     mgmt_thread = threading.Thread(target=server_management_loop, daemon=True)
     mgmt_thread.start()
-    
+
     # 서버 기동 대기
     time.sleep(1.5)
-    
+
+    if args.server:
+        print(f"[run.py] Server mode running on http://0.0.0.0:{port}")
+        if config.get("share_path"):
+            print(f"[run.py] Auto-sharing files from: {config['share_path']}")
+        print("[run.py] Press Ctrl+C to stop.")
+        try:
+            while not app_should_exit:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            print("\n[run.py] Shutting down...")
+            app_should_exit = True
+            if server_instance:
+                server_instance.should_exit = True
+        return
+
     # pywebview 클라이언트 윈도우 생성
     print("[run.py] Creating Webview window...")
     window_instance = webview.create_window(

@@ -13,9 +13,14 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 from sqlalchemy import func, text
 
-from app.database import engine, get_db, DB_FILE
+from app.database import engine, get_db, DB_FILE, SessionLocal
 from app.models import Base, FileMetadata, Container
 from app.logger import get_logger, LOG_FILE
+from app.share_sync import (
+    sanitize_container_id, is_hash_filename, sync_share_path,
+    sync_container_from_path, list_share_rooms, cleanup_duplicate_directories,
+    DEFAULT_SHARE_ROOT_ROOM
+)
 
 # DB 테이블 생성
 Base.metadata.create_all(bind=engine)
@@ -68,6 +73,43 @@ if not os.path.exists(UPLOAD_DIR):
 # 설정 파일 경로
 CONFIG_PATH = os.path.join(RUNNING_DIR, "config.json")
 
+def load_config():
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def get_share_path() -> Optional[str]:
+    share_path = load_config().get("share_path", "")
+    if share_path and os.path.isdir(share_path):
+        return os.path.abspath(share_path)
+    return None
+
+def get_storage_base() -> str:
+    share_path = get_share_path()
+    return share_path if share_path else UPLOAD_DIR
+
+def get_container_upload_dir(container_id: str) -> str:
+    safe_id = sanitize_container_id(container_id)
+    path = os.path.join(get_storage_base(), safe_id)
+    os.makedirs(path, exist_ok=True)
+    return path
+
+def get_file_physical_path(container_id: str, filename: str) -> str:
+    if not filename:
+        return ""
+    container_dir = get_container_upload_dir(container_id)
+    if is_hash_filename(filename):
+        new_path = os.path.join(container_dir, filename)
+        if os.path.exists(new_path):
+            return new_path
+        legacy_path = os.path.join(UPLOAD_DIR, filename)
+        if os.path.exists(legacy_path):
+            return legacy_path
+        return new_path
+    return os.path.join(container_dir, filename.replace('/', os.sep))
+
 # 정적 파일 경로 지정
 if IS_FROZEN:
     STATIC_DIR = os.path.join(sys._MEIPASS, "app", "static")
@@ -75,6 +117,18 @@ else:
     STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
 app = FastAPI(title="Simple File Share API")
+
+@app.on_event("startup")
+def startup_sync_share_path():
+    share_path = get_share_path()
+    if share_path:
+        db = SessionLocal()
+        try:
+            config = load_config()
+            root_room = config.get("share_root_room", DEFAULT_SHARE_ROOT_ROOM)
+            sync_share_path(share_path, db, logger, share_root_room=root_room)
+        finally:
+            db.close()
 
 # Uvicorn 서버 객체 글로벌 참조 관리
 global_server = None
@@ -85,12 +139,8 @@ def set_server_instance(server):
     logger.info("Uvicorn server instance bound successfully.")
 
 def get_max_upload_size():
-    try:
-        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-            config = json.load(f)
-            return config.get("max_upload_size_mb", 100) * 1024 * 1024
-    except Exception:
-        return 100 * 1024 * 1024 # 기본값 100MB
+    config = load_config()
+    return config.get("max_upload_size_mb", 100) * 1024 * 1024
 
 # Uvicorn 종료 태스크 (별도 스레드/태스크로 실행)
 async def restart_server_task():
@@ -211,6 +261,7 @@ def update_settings(settings: dict, background_tasks: BackgroundTasks, x_admin_p
     new_admin_path = settings.get("admin_path")
     new_max_failed = settings.get("max_failed_attempts")
     new_salt = settings.get("password_salt")
+    new_share_path = settings.get("share_path")
     
     if not port or not isinstance(port, int) or port < 1024 or port > 65535:
         raise HTTPException(status_code=400, detail="Invalid port number. Must be between 1024 and 65535.")
@@ -240,6 +291,11 @@ def update_settings(settings: dict, background_tasks: BackgroundTasks, x_admin_p
         settings["password_salt"] = new_salt
     else:
         settings["password_salt"] = old_conf.get("password_salt", "")
+
+    if new_share_path is not None and isinstance(new_share_path, str):
+        settings["share_path"] = new_share_path.strip()
+    else:
+        settings["share_path"] = old_conf.get("share_path", "")
     try:
         with open(CONFIG_PATH, "w", encoding="utf-8") as f:
             json.dump(settings, f, indent=4)
@@ -252,6 +308,14 @@ def update_settings(settings: dict, background_tasks: BackgroundTasks, x_admin_p
             background_tasks.add_task(restart_server_task)
             return {"status": "restarting", "message": "Port changed. Server is restarting..."}
         else:
+            share_path = settings.get("share_path", "").strip()
+            if share_path and os.path.isdir(share_path):
+                db = SessionLocal()
+                try:
+                    root_room = settings.get("share_root_room", DEFAULT_SHARE_ROOT_ROOM)
+                    sync_share_path(os.path.abspath(share_path), db, logger, share_root_room=root_room)
+                finally:
+                    db.close()
             return {"status": "success", "message": "Settings saved successfully."}
             
     except Exception as e:
@@ -353,7 +417,7 @@ def get_readme(container_id: str, folder_path: str = Query(""), db: Session = De
     if not readme_file:
         raise HTTPException(status_code=404, detail="README.md not found")
     
-    file_path = os.path.join(UPLOAD_DIR, readme_file.filename)
+    file_path = get_file_physical_path(container_id, readme_file.filename)
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="File missing")
     
@@ -366,6 +430,15 @@ def get_readme(container_id: str, folder_path: str = Query(""), db: Session = De
 
 @app.get("/api/files/{container_id}")
 def list_files(container_id: str, folder_path: str = Query(""), page: int = Query(1), page_size: int = Query(50), db: Session = Depends(get_db), x_container_password: str = Header(None), x_admin_password: str = Header(None)):
+    share_path = get_share_path()
+    if share_path:
+        room_path = os.path.join(share_path, sanitize_container_id(container_id))
+        if not os.path.isdir(room_path):
+            exact_path = os.path.join(share_path, container_id)
+            room_path = exact_path if os.path.isdir(exact_path) else None
+        if room_path:
+            sync_container_from_path(container_id, room_path, db, logger)
+
     container = db.query(Container).filter(Container.id == container_id).first()
     effective_pw = get_effective_password(container_id, container)
     
@@ -442,9 +515,10 @@ async def upload_file(
         
     logger.info(f"Starting file upload: {file.filename} to container {container_id}")
     
+    container_dir = get_container_upload_dir(container_id)
     file_id = str(uuid.uuid4())
     temp_filename = f"temp_{file_id}"
-    temp_path = os.path.join(UPLOAD_DIR, temp_filename)
+    temp_path = os.path.join(container_dir, temp_filename)
     
     total_size = 0
     hasher = hashlib.sha256()
@@ -470,7 +544,7 @@ async def upload_file(
     
     file_hash = hasher.hexdigest()
     saved_filename = file_hash
-    saved_path = os.path.join(UPLOAD_DIR, saved_filename)
+    saved_path = os.path.join(container_dir, saved_filename)
     
     if not os.path.exists(saved_path):
         os.replace(temp_path, saved_path)
@@ -584,7 +658,7 @@ def download_file(file_id: str, db: Session = Depends(get_db), x_container_passw
         if not is_admin and not is_room_auth:
             raise HTTPException(status_code=401, detail="권한이 없습니다.")
     
-    file_path = os.path.join(UPLOAD_DIR, db_file.filename)
+    file_path = get_file_physical_path(db_file.container_id, db_file.filename)
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="Physical file missing from storage.")
     
@@ -623,8 +697,9 @@ def delete_file(container_id: str, file_id: str, db: Session = Depends(get_db), 
                 
         for item in to_delete:
             if not item.is_directory and item.filename:
-                file_path = os.path.join(UPLOAD_DIR, item.filename)
+                file_path = get_file_physical_path(container_id, item.filename)
                 remaining = db.query(FileMetadata).filter(
+                    FileMetadata.container_id == container_id,
                     FileMetadata.filename == item.filename,
                     FileMetadata.id != item.id
                 ).count()
@@ -638,8 +713,9 @@ def delete_file(container_id: str, file_id: str, db: Session = Depends(get_db), 
         return {"message": "Folder and its contents deleted successfully."}
     else:
         if db_file.filename:
-            file_path = os.path.join(UPLOAD_DIR, db_file.filename)
+            file_path = get_file_physical_path(container_id, db_file.filename)
             remaining = db.query(FileMetadata).filter(
+                FileMetadata.container_id == container_id,
                 FileMetadata.filename == db_file.filename,
                 FileMetadata.id != db_file.id
             ).count()
@@ -755,14 +831,22 @@ def admin_delete_container(container_id: str, db: Session = Depends(get_db), x_a
         raise HTTPException(status_code=404, detail="Container not found.")
         
     files = db.query(FileMetadata).filter(FileMetadata.container_id == container_id).all()
+    container_dir = get_container_upload_dir(container_id)
     for f in files:
-        file_path = os.path.join(UPLOAD_DIR, f.filename)
-        if os.path.exists(file_path):
-            try:
-                os.remove(file_path)
-            except:
-                pass
+        if f.filename and not f.is_directory:
+            file_path = get_file_physical_path(container_id, f.filename)
+            if os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                except:
+                    pass
         db.delete(f)
+
+    if os.path.isdir(container_dir):
+        try:
+            shutil.rmtree(container_dir)
+        except:
+            pass
         
     db.delete(container)
     db.commit()
@@ -788,10 +872,20 @@ def get_server_info():
             port = config.get("port", 8000)
     except Exception:
         port = 8000
+    share_path = get_share_path()
     return {
         "local_ip": get_local_ip(),
-        "port": port
+        "port": port,
+        "share_path": share_path or "",
+        "share_enabled": bool(share_path)
     }
+
+@app.get("/api/share/rooms")
+def get_share_rooms():
+    share_path = get_share_path()
+    if not share_path:
+        return {"rooms": [], "share_path": ""}
+    return {"rooms": list_share_rooms(share_path), "share_path": share_path}
 
 @app.get("/api/logs")
 def get_logs(x_admin_password: str = Header(None)):
